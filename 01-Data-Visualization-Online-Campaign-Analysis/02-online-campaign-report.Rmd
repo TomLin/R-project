@@ -1,0 +1,522 @@
+---
+title: "Online Campaign Analysis Case"
+author: "Tom Lin"
+date: '2017'
+output:
+  html_document:
+    keep_md: true
+    number_sections: yes
+    theme: journal
+    toc: yes
+    toc_depth: 4
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+  pdf_document:
+    toc: yes
+    toc_depth: '4'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+library(scales)
+library(readr)
+library(dplyr)
+library(stringr)
+library(ggplot2)
+library(ggrepel)
+library(grid)
+library(gridExtra)
+library(RColorBrewer)
+library(lubridate)
+
+### 001_A read-in raw file ####
+raw_camp = read_delim('./Dataset/01-campaign-data.csv', col_names = TRUE, delim = ';')
+
+### 001_B check for data quality ####
+any(is.na(raw_camp))
+any(duplicated(raw_camp))
+raw_camp = raw_camp[-which(duplicated(raw_camp)),]
+names(raw_camp) = str_to_lower(names(raw_camp))
+
+### 002 all_volumn ####
+group_var = 'week'
+all = raw_camp %>% group_by_(.dots = group_var) %>% 
+      summarise_if(.predicate = is.numeric, .funs = sum, na.rm=TRUE) %>% 
+      mutate(campaign = 'All')
+
+all_volumn = bind_rows(raw_camp, all)
+
+all_volumn$week_prefix = sprintf("week %02d",all_volumn$week)
+all_volumn$week = as.character(all_volumn$week)
+all_volumn$revenue = round(all_volumn$revenue, digits = 2)
+all_volumn$cost = round(all_volumn$cost, digits = 2)
+all_volumn$campaign = factor(all_volumn$campaign)
+all_volumn$campaign = reorder(all_volumn$campaign, all_volumn$visits, FUN=mean, na.rm=TRUE)
+all_volumn$campaign = factor(all_volumn$campaign, levels = rev(levels(all_volumn$campaign)))
+
+str(all_volumn)
+# calculate the avg growth rate
+all_volumn2 = all_volumn %>% group_by(campaign) %>% arrange(campaign, week_prefix) %>% 
+      mutate(visits_grow = round((visits - lag(visits))/lag(visits),digits=4),
+             revenue_grow = round((revenue - lag(revenue))/lag(revenue),digits=4),
+             cost_grow = round((cost - lag(cost))/lag(cost),digits=4))
+# calculate the ratio of visits, revenue, cost 
+all_volumn2 = all_volumn2 %>% group_by(campaign) %>% 
+      mutate(visits_cost_ratio = (visits/cost),
+             revenue_cost_ratio = (revenue/cost),
+             revenue_visits_ratio = (revenue/visits))
+
+### 003_A all_volumn3 ####
+all_volumn3 = all_volumn2[all_volumn2$campaign != 'All',] %>% group_by(week) %>% 
+      mutate(revenue_sum = sum(revenue, na.rm=TRUE),
+             revenue_share = round(revenue/revenue_sum, digits=4))
+
+
+### 003_B all_volumn_pivot, which calculates the derived columns ####
+all_volumn_pivot = all_volumn2 %>% group_by(campaign) %>% 
+      summarise_if(.predicate= is.numeric, .funs = c(min=min,mean=mean,median=median,max=max), na.rm=TRUE)
+
+
+### 004 plot01 ####
+plot01 = ggplot(all_volumn2, aes(x=week_prefix, y=visits, group=campaign, col=campaign)) + geom_line() + geom_point() + geom_text_repel(aes(label=visits)) +
+scale_y_continuous(breaks = pretty_breaks(n = 10)) +
+scale_color_manual(values=c("#67001F","#4D4D4D","#6E8E84","#CAC27E")) +
+xlab("week number") +
+theme_minimal() +
+theme(legend.position = "right") +
+theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+### 005 plot02 ####
+plot02 = ggplot(all_volumn2, aes(x=week_prefix, y=revenue, group=campaign, col=campaign)) + geom_line() + geom_point() + geom_text_repel(aes(label=revenue)) +
+scale_y_continuous(breaks = pretty_breaks(n = 10)) +
+scale_color_manual(values=c("#67001F","#4D4D4D","#6E8E84","#CAC27E")) +
+xlab("week number") +
+theme_minimal() +
+theme(legend.position = "right") +
+theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+### 006 plot03_A ####
+plot03_A = ggplot(all_volumn2[all_volumn2$campaign != 'All',], aes(x = campaign, y = (revenue/cost), group=campaign, col=campaign)) +
+      geom_boxplot() + scale_color_manual(values=c("#4D4D4D","#6E8E84","#CAC27E")) +
+      scale_y_continuous(breaks = pretty_breaks(n = 10)) +
+      ylab("revenue/cost")
+
+### 007 plot03_B ####
+plot03_B = ggplot(all_volumn2[all_volumn2$campaign != 'All',], 
+aes(x=week_prefix, y=round(revenue/cost, digits=2), group=campaign, col=campaign)) +
+geom_line() + geom_point() + geom_text_repel(aes(label=round(revenue/cost, digits=2))) +
+scale_y_continuous(breaks = pretty_breaks(n = 10)) +
+scale_color_manual(values=c("#4D4D4D","#6E8E84","#CAC27E")) +
+xlab("week number") +
+ylab("revenue/cost") +
+theme_minimal() +
+theme(legend.position = "right") +
+theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+### 008 plot03_C ####
+plot03_C = ggplot(all_volumn2[all_volumn2$campaign != 'All',], aes(x = cost, y = visits, group=campaign, col=campaign)) +
+      geom_point() + scale_color_manual(values=c("#4D4D4D","#6E8E84","#CAC27E")) +
+      geom_smooth(method=lm) +
+      theme_minimal()
+
+### 008 plot04_A ####
+plot04_A = ggplot(all_volumn2[all_volumn2$campaign != 'All',], aes(x = campaign, y = (revenue/visits), group=campaign, col=campaign)) +
+      geom_boxplot() + scale_color_manual(values=c("#4D4D4D","#6E8E84","#CAC27E")) +
+      scale_y_continuous(breaks = pretty_breaks(n = 10)) +
+      ylab("revenue/visits")
+
+### 009 plot04_B ####
+plot04_B = ggplot(all_volumn2[all_volumn2$campaign != 'All',],
+                  aes(x = week_prefix, y = cost, group = campaign, col = campaign)) +
+      geom_line() +
+      geom_text_repel(aes(label=cost)) +
+      scale_y_continuous(breaks = pretty_breaks(n = 10)) +
+      scale_color_manual(values=c("#4D4D4D","#6E8E84","#CAC27E")) +
+      xlab("week number") +
+      theme_minimal() +
+      theme(legend.position = "right") +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+### 010 plot04_C ####
+plot04_C = ggplot(all_volumn3, aes(x=week_prefix,y=revenue_share, fill=campaign)) + 
+geom_bar(stat = "identity", position = 'stack') +
+scale_fill_manual(values=c("#4D4D4D","#6E8E84","#CAC27E")) +
+scale_y_continuous(breaks = seq(0.1,1,by=0.1), labels = sprintf("%s%%",seq(10,100,by=10))) +
+ylab("revenue share") +
+xlab("week number") +
+theme_minimal() +
+theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+### 011 plot04_D ####
+plot04_D = ggplot(all_volumn3, aes(x=week_prefix,y=round(revenue-cost,digits=2), fill=campaign)) +
+      geom_bar(stat="identity", position = "dodge") + 
+      scale_y_continuous(breaks = pretty_breaks(n = 10)) +
+      scale_fill_manual(values=c("#4D4D4D","#6E8E84","#CAC27E")) +
+      ylab("net profit") +
+      xlab("week number") +
+      theme_minimal() +
+      theme(legend.position = "right") +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+### 012 fit linear model ####
+fit.visits.lm = lm(data=all_volumn3[all_volumn3$campaign == 'Campaign_A',],
+                   formula=visits ~ cost)
+summary(fit.visits.lm)
+predict(fit.visits.lm, newdata = data.frame(cost = c(250)), interval = "confidence")
+
+fit.revenue.lm = lm(data=all_volumn3[all_volumn3$campaign == 'Campaign_A',],
+                   formula=revenue ~ cost)
+summary(fit.revenue.lm)
+predict(fit.revenue.lm, newdata = data.frame(cost = c(250)), interval = "confidence")
+
+
+### 013 read-in raw file for session dataset ####
+raw_sess = read_delim('./Dataset/02-session-data.csv', col_names = TRUE, delim = ';',
+col_types = cols(
+    session = col_character(),
+    session_start_text = col_time(format = "%H:%M:%S"),
+    session_end_text = col_time(format = "%H:%M:%S"),
+    clickouts = col_integer(),
+    booking = col_integer()
+))
+
+### 014 check for data quality ####
+any(is.na(raw_sess))
+any(duplicated(raw_sess))
+
+if (length(which(duplicated(raw_sess)))) {
+      raw_sess = raw_sess[-which(duplicated(raw_sess)),]
+}
+
+names(raw_sess) = str_to_lower(names(raw_sess))
+names(raw_sess)[which(names(raw_sess) == "session_start_text")] = "session_start_time"
+names(raw_sess)[which(names(raw_sess) == "session_end_text")] = "session_end_time"
+
+
+### 015 sess_derived ####
+sess_derived = raw_sess %>% 
+      mutate(hour = sprintf("%02d",hour(session_start_time)),
+             booking = factor(booking),
+             stay_time = as.numeric(session_end_time - session_start_time)) %>% 
+      ungroup()
+
+
+# remove negative stay_time
+if (length(which(sess_derived$stay_time < 0))) {
+      sess_derived = sess_derived[-which(sess_derived$stay_time < 0),]
+}
+
+
+# some observations are omited because they have negtive duration time on websites.
+# around 13 observations are removed.
+
+### 016 sess_derived_h ####
+sess_derived_h = sess_derived %>% group_by(hour,booking) %>% 
+summarise(hour_count = n(),
+          stay_time_mean=mean(stay_time,na.rm=TRUE),
+          stay_time_median=median(stay_time, na.rm=TRUE),
+          clickouts_mean=mean(clickouts,na.rm=TRUE),
+          clickouts_median=median(clickouts,na.rm=TRUE)) %>% 
+ungroup() %>% 
+group_by(booking) %>% 
+mutate(hour_count_median = median(hour_count,na.rm=TRUE),
+       hour_count_above_median = factor(ifelse(hour_count >= hour_count_median,1,0)))
+
+### 017 sess_derived2 ####
+# which is appended with the flag for 'hour_count_above_median' 
+sess_derived2 = sess_derived %>% 
+left_join(sess_derived_h[,c("booking","hour","hour_count_above_median")], by = c("hour"="hour","booking"="booking"))
+
+
+### 018 The Distribution of Appearing For Both Type of Visitors ####
+plot05_A = ggplot(sess_derived2, aes(x=as.numeric(hour), col=booking)) + 
+      geom_density() +
+      scale_y_continuous(breaks = pretty_breaks(n = 10)) +
+      scale_x_continuous(breaks = seq(0,23,by=1)) +
+      scale_color_manual(values = c("#1A476F","#90353B")) +
+      labs(fill="booking or not") +
+      ylab("appearing distribution") +
+      xlab("hour") +
+      theme_minimal()
+
+### 019 the distribution of session duration time for both type of visitors ####
+plot05_B = ggplot(sess_derived2, aes(x=booking,y=stay_time,fill=booking)) +
+      geom_boxplot() +
+      scale_y_continuous(breaks = pretty_breaks(n = 20)) +
+      scale_fill_manual(values = c("#1A476F","#90353B")) +
+      labs(fill="booking or not") +
+      ylab("session duration time") +
+      theme_minimal()
+
+### 020 the appearing time of the day for booking visitors ####
+plot06_A = ggplot(sess_derived_h[sess_derived_h$booking==1,], aes(x=hour, y=hour_count, fill=hour_count_above_median)) + 
+      geom_bar(stat='identity') +
+      scale_y_continuous(breaks = pretty_breaks(n = 10)) +
+      scale_fill_manual(values = c("#D9D9D9", "#FB6A4A")) +
+      geom_text(aes(y = hour_count, label = hour_count), vjust = 1.5) +
+      labs(fill="above median booking number") +
+      ylab("booking number") +
+      theme_minimal()
+
+### 021 the distribution of session duration time over 24 hours range ####
+plot06_B = ggplot(sess_derived2[sess_derived2$booking==1,], aes(x=hour,y=stay_time,fill=hour_count_above_median)) +
+      geom_boxplot() +
+      scale_y_continuous(breaks = pretty_breaks(n = 20)) +
+      scale_fill_manual(values = c("#D9D9D9", "#FB6A4A")) +
+      labs(fill="above median booking number") +
+      ylab("session duration time") +
+      theme_minimal()
+
+### 022 ANOVA test ####
+fit.session.anova = aov(formula = stay_time ~ factor(hour), 
+                        data = sess_derived2[sess_derived2$booking==1,])
+
+fit.session.high_booking_hour.anova = aov(formula = stay_time ~ factor(hour_count_above_median), data = sess_derived2[sess_derived2$booking==1,])
+
+
+
+```
+
+## Campaign Analysis
+- Quality assessment: 
+      1. The campaign data doesn't contain missing values.
+      2. The campaign data has one duplicated row, which is now removed from the analyzing dataset.
+
+- Analysis Goal:
+      1. Is the tourism market booming or falling now?
+      2. On the perspective of cost effectiveness, which campaign does perform the best?
+      3. On the perspective of traffic quality, which campaign does perform the best?
+      4. What is the recommended campaign to be extended and its predicted outcome?
+      5. Appendix: the descriptive statistics of campaign performance.(in email attachment)
+
+### Is the tourism market booming or falling now?
+
+**Plot_01:** Gross Visits Over The Weeks
+```{r create plot01, fig.width=10, fig.height=7}
+plot01
+```
+
+> The overall visits keep growing but the main driving force comes from Campaign_A.
+
+As we can tell, the only significant growth of traffic comes from `Campaign_A`, hence **it's hard to say we are in the tourist booming season**. But we can definitely say Campaign_A performs very well on attracting potential customers and build up the brand awareness.
+
+Next, let's look at the revenue performance.
+
+**Plot_02:** Gross Revenue Over The Weeks
+```{r create plot02, fig.width=10, fig.height=7}
+plot02
+```
+
+> While all campaign's gross revenue are growing or remain steady, Campaign_A contributes the least revenue among all.
+
+On the other hand, `Campaign_C` instead brings in **the most revenue over this period**. In order to better assess each campaign, let's look at the cost performance on each campaign then.
+
+### Regarding cost effectiveness, which one performs the best?
+
+**Plot_03_A:** The Distribution of Revenue Generated per Cost
+```{r create plot03_A, fig.width=5}
+plot03_A
+```
+
+In the chart above, **the horizontal line** in each box represents the median of revenue versus cost for the campaign and **the length of the box** represents the major distribution of the revenue versus cost over the period.
+
+We can tell that **Campaign_C** has the highest ratio on revenue generated per cost `median 1.05`, whereas the medians for **Campaign_A** and **Campaign_B** are `median (0.92,0.90)`
+
+> But if we look at the trend, it tells another story.
+
+**Plot_03_B:** The Trend of Revenue Generated per Cost
+```{r create plot03_B, fig.width=10}
+plot03_B
+```
+
+> The revenue versus cost ratio of Campaign_A keeps rising but the Campaign_C's is decreasing.
+
+**The ratio for Campaign_A surpasses others at around week 21** and the growth has sustained for a couple of weeks, which implies it's now already a steady trend.
+
+Also, it's worth mentioning that by the `week 21 and following weeks`, only Campaign_A's revenue can cover it's investment, **the rest are in deficit**.
+
+So how could this happened? Let's look at the `visits` versus `cost` then.
+
+
+**Plot_03_C:** The Gross Visits versus Gross Cost
+```{r create plot03_C}
+plot03_C
+```
+
+> As the cost increases, only visits of Campaign_A follow up, but the other's visits almost remain the same.
+
+**Yes, now we see the power of traffic**, the greatest thing of `Campaign_A` lays in its power on attracting traffic. However, from the chart we can tell **maybe the other two campaigns already reach their full potential customers**. No matter how much the money we spend on them, there is almost no growth on visits.
+
+If it is the case, then what's the merit of Conttington? **Should we just close it right away?**
+
+Maybe let's set back and look the other way around. Let's dicuss the quality of traffic.
+
+### Regarding traffic quality, which one performs the best?
+
+**Plot_04_A:** The Distribution of Revenue Generated per Visit
+```{r create plot04_A, fig.width=5}
+plot04_A
+```
+
+> The visit of Conttington brings in the most revenue.
+
+Though we can't increase the visits of Conttington, **but the customers directed from Conttington seem to be quite loyal and generate large revenues**. Besides, the reason why revenue versus cost of Conttington keeps falling is because we spend `useless money` on expanding the campaign. **As it is evident from the chart below. The cost keeps growing while visits don't.**
+
+**Plot_04_B:** The Trend of Cost Over the weeks
+```{r create plot04_B, fig.width=10}
+plot04_B
+```
+
+
+Furthermore, it is also suppported by `the changes of revenue share` among all campaigns and `the net profit` of each campaign over the weeks.
+
+Over the campaign course, Campaign_A's revenue share keeping growing and the Campaign_C one is shrinking. In addition, **the net profits of Campaign_A keeps improving over the period whereas the Conttington one is deteriorating.** 
+
+**Plot_04_C:** The Change of Revenue Share and Net Profit Over The Weeks
+```{r create plot04_C and plot04_D, fig.width=11}
+plot04_C
+plot04_D
+```
+
+> So with all these reasonings, we are confident to say it's best to focus on Campaign_A, and increase budgets on it.
+
+**But the question raised...**
+
+### What is its predicted outcome?
+
+Since now we've decided to extend the period of Campaign_A campaign, in order to predict `the effects of extra 250 euros spending`, we can apply **simple linear regresion** to answer the question.
+
+> The followings are the respective regression for the effect of cost on visits and revenue:
+
+- **Visits vs Cost**
+$$Visits = 52.7 + 2.72*Cost \;\;\;\;\;\;\;\;\; R^{2} = 0.92$$
+
+- **Revenue vs Cost**
+$$Revenue = -16.8 + 1.18*Cost \;\;\;\;\;\;\;\;\; R^{2} = 0.98$$
+
+Hence, we can expect that the extra visits would be **`r 52.7 + 2.72*250`** with confidence interval between `(685.41, 782.69)` under 95% confidence level.
+
+And the revenue would be **`r -16.8 + 1.18*250`** with confidence interval between `(268.03, 288.73)` under 95% confidence level.
+
+### Appendix: transformed analysis dataset and descriptive statistics
+
+> The infomation is inclosed in the email attachment.
+
+## Session Analysis
+- Quality assessment: 
+      1. The session data doesn't contain missing values.
+      2. The session data has 13 observations which have negative session duration time. They are removed from the analysis dataset.
+
+- Analysis Goal:
+      1. What is the appearing hour of the day/session duration time for booking/non-booking visitors? Are they different from each other?
+      2. When is the hottest booking hour for visitors?
+      3. How to identify long session time visitors from the short session time visitors?
+      4. ANOVA test for the relationship between appearing time, hottest booking hours and session duration time.
+      5. Final words.
+      6. Appendix: the transformed analysis dataset and descriptive statistics. (in the email attachment)
+
+> As marketing professionals, we often ask, what is the best timing to reach our potential customers? So, let's see if we can discover something interesting in the following analysis.
+
+### The appearing hour of day for booking/non-booking visitors?
+
+**The chart below shows up the appearing distribution in the hour of day for each group. It is a quantile scale now.**
+
+`Zero` represensts non-booking visitors, while `one` represents booking visitors. 
+
+**Plot_05_A:** The Distribution of Appearing For Both Type of Visitors
+```{r create plot05}
+plot05_A
+```
+
+> It seems like there doesn't exit significant difference of appearing distribution between the two group.
+
+**In addition, we can take a look at the distribution of session duration time, see if they are different from each other.**
+
+**Plot_05_B:** The Distribution of Session Duration Time For Both Type of Visitors
+```{r create plot05_B, fig.width=5}
+plot05_B
+```
+
+> Again, their distribution seem quite smilar. No significant difference of session duration time, either.
+
+Therefore, it is hard to dig out insights from such results.
+
+However, `in most marketing cases, we don't pay much attention to the non-booking visitors.` For booking visitors always account only a pretty small proportion of the whole population. Excluding the non-booking visitors will **reduce the data noise** brought up by them, and only by then `the key features` of the booking visitors will be more `evident`.
+
+While on the subject, allow me mention that session duration time in both groups looks like following normal distribution. 
+
+**So now, let's focus on the booking visitors in the following analysis.**
+
+
+### The hottest booking hour of day
+
+In the chart below, `the dark-shaded bar` represents that its booking number is above the median of all hours. On the contrary, the `light-shaded bar` means its number below the median.
+
+**Plot_06_A:** The Appearing Hour of Day For Booking Visitors
+```{r create plot06, fig.width=10}
+plot06_A
+```
+
+> Though not obviously, it still reveals mild deviation of show-up time for the booking visitors.
+
+Therefore, we can say that the hottest booking hour of the day can break into the following time frame.
+
+- mid-night (01~02)
+- the early morning (06~07), probably the commuting hour
+- at noon break (12~13)
+- the evening (18~20), this is the longest continuous time for the booking visitors to show up.
+
+**Hence, It is suggested that we should increase the communication intensity in the evening**, in order to maximize the performance.
+
+### How to identify long session time visitors from the short session time visitors
+
+**Usually visitors with long session duration time have rather different personal character to the ones with short session duration time.** Therefore, it requires different marketing strategy to appeal to them. The question we have now is that could we identify long/short session duration time visitors just based on their appearing hour of day?
+
+**plot_06_B:** The Distribution of Session Duration Time Over 24 hours Range
+```{r create plot06_B, fig.width=10}
+plot06_B
+```
+
+> It seems like both long session time visitors and short session time visitors are distributed evenly in every hour.
+
+As we can tell that the distribution of session duration time is somehow `symmetric` in every hour.
+
+Furthermore, if we focus on the hottest booking hour when visitors mostly likely to book `(in the dark-shaded box of the chart above)`, the distribution of session duration time in these hours still shows no significant skewness or deviation. **It implies that we can't identify long session time visitor from short session time visitor just based on their appearing hour nor the hottest booking hours.**
+
+If we want to further confirm with our judgement. We can apply `ANOVA test`, to see if there has statistical significance of difference on `hours versus session duration time`, and `the hottest booking hours versus session duration time`.
+
+### ANOVA test for statistic proof
+
+- **ANOVA (session duration time ~ hour)**: used to test if different hour has impact on session duration time distribution.
+
+```{r anova session output, results='markup'}
+summary(fit.session.anova)
+```
+
+The test result is `p-value 0.091` which is not significant. So the distribution among each hours are the same.
+
+- **ANOVA (session duration time ~ hottest booking hour)**: used to test if hottest booking hours have impact on session duration time distribution.
+
+```{r anova high booking hour output, results='markup'}
+summary(fit.session.high_booking_hour.anova)
+```
+
+The test result is `p-value 0.16` which is not significant. So the session duration time distribution between hottest booking hours and low booking hours are the same.
+
+> Both ANOVA test confirm that session duraiton time is ditributed evenly among hours and has no relation to hottest booking hour either.
+
+### Final words
+
+In a glimpse, we can tell booking and non-booking visitors seem to have the same characteristics on appearing hour and session duration time. That yields no fruitful results.
+
+Following the analysis above, we can conclude that **the best hours to communicate with visitors lay in the evening (18~20).** It is also a rather longer continuous period for booking visitors to show up. 
+
+Because of no relation between session duration time with the appearing hours, given the current info, **we cannot tell nor identify who will stay longer and who won't and thus communicate in different strategy.** We should have more information in order to predict vistors' behavior precisely, such as the demography of visitors.
+
+### Appendix: transformed analysis dataset and descriptive statistics
+
+> The infomation is inclosed in the email attachment.
