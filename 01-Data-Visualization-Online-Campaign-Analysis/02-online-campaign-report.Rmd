@@ -2,19 +2,8 @@
 title: "Online Campaign Analysis Case"
 author: "Tom Lin"
 date: '2017'
-output:
-  html_document:
-    keep_md: true
-    number_sections: yes
-    theme: journal
-    toc: yes
-    toc_depth: 4
-    toc_float:
-      collapsed: no
-      smooth_scroll: yes
-  pdf_document:
-    toc: yes
-    toc_depth: '4'
+output: rmarkdown::github_document
+  
 ---
 
 ```{r setup, include=FALSE}
